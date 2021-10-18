@@ -3,7 +3,7 @@ use local_ip_address::local_ip;
 use nannou_osc::Packet;
 use program::Program;
 
-use crate::{program::program_from_osc_addr, scanner::Scanner};
+use crate::{program::program_from_osc_addr};
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -12,6 +12,7 @@ fn main() {
 mod pulse;
 mod program;
 mod scanner;
+mod theater_chase;
 
 pub type LedColor = Hsl<nannou::color::encoding::Srgb>;
 pub type LedStripVec = Vec<[LedColor; 150]>;
@@ -20,6 +21,7 @@ pub struct Model {
     pub receiver: nannou_osc::Receiver,
     pub led_strips: LedStripVec,
     pub color: crate::LedColor,
+    pub color2: crate::LedColor,
     pub fps: f32,
     pub fps_offset: f32,
     pub program: Option<Box<dyn Program>>,
@@ -53,10 +55,11 @@ fn model(app: &App) -> Model {
         receiver,
         led_strips,
         color: nannou::color::rgb(1.0, 0.0, 0.0).into(),
+        color2: nannou::color::rgb(0.0, 0.0, 0.0).into(),
         fps: 40.0,
         fps_offset: 0.0,
-        // program: None,
-        program: Some(Box::new(Scanner::default())),
+        program: None,
+        // program: Some(Box::new(scanner::Scanner::default())),
     }
 }
 

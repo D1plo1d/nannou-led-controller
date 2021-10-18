@@ -14,7 +14,7 @@ pub fn program_from_osc_addr(s: &str) -> Result<Box<dyn Program>> {
         "/program/scanner" => Ok(Box::new(crate::scanner::Scanner::default())),
         // "/program/fireworks" => Ok(Self::Fireworks(Fireworks)),
         // "/program/blink" => Ok(Self::Blink(Blink)),
-        // "/program/theaterchase" => Ok(Self::TheaterChase(TheaterChase)),
+        "/program/theaterchase" => Ok(Box::new(crate::theater_chase::TheaterChase::default())),
         // "/program/vumeter" => Ok(Self::VUMeter(VUMeter)),
         // "/program/preprogram" => Ok(Self::PreProgram(PreProgram)),
         _ => Err(eyre!("Invalid program string")),
