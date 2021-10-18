@@ -1,0 +1,12 @@
+[package]
+name = "nannou-led-controller"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+eyre = "0.6.5"
+local-ip-address = "0.4.4"
+nannou = "0.17.1"
+nannou_osc = "0.17.0"
