@@ -1,5 +1,9 @@
-use nannou::color::{Hsl, IntoColor, hsl};
-
+use nannou::{color::{Hsl, hsl}, prelude::ToPrimitive};
+use eyre::{
+    eyre,
+    // Error,
+    Result,
+};
 use crate::program::Program;
 
 #[derive(Debug)]
@@ -21,7 +25,7 @@ impl Default for TheaterChase {
     fn default() -> Self {
         Self {
             index: Default::default(),
-            tail_length: 30,
+            tail_length: 10,
             pixel_distance: 25,
             mode: TheaterChaseMode::Regular,
         }
@@ -30,37 +34,54 @@ impl Default for TheaterChase {
 
 impl Program for TheaterChase {
     fn update(&mut self, model: &mut crate::Model) {
-        match self.mode {
-            TheaterChaseMode::Rainbow => {
-                unimplemented!();
-                // let total_led_count = model.led_strips
-                //     .iter()
-                //     .fold(0, |sum, led_strip| sum + led_strip.len());
-                // // let total_led_count = 150;
+        for led_strip in model.led_strips.iter_mut() {
+            let strip_len = led_strip.len();
+            let leds = led_strip.iter_mut().enumerate();
+            self.update_leds(
+                model.color.clone(),
+                model.color2.clone(),
+                strip_len,
+                leds,
+            )
+        }
 
-                // let all_leds = model.led_strips
-                //     .iter_mut()
-                //     .flat_map(|led_strip| led_strip.iter_mut())
-                //     .enumerate();
-
-                // self.update_leds(model.color.clone(), total_led_count, all_leds);
-            }
-            TheaterChaseMode::Regular => {
-                for led_strip in model.led_strips.iter_mut() {
-                    let strip_len = led_strip.len();
-                    let leds = led_strip.iter_mut().enumerate();
-                    self.update_leds(
-                        model.color.clone(),
-                        model.color2.clone(),
-                        strip_len,
-                        leds
-                    );
-                }
-            }
-        };
         // Increment the counter
         self.index = self.index.wrapping_add(1);
     }
+
+    fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
+        use nannou_osc::Type::*;
+        match (addr, args) {
+            ("/variable/chase_mode", [
+                Float(mode_id),
+            ]) => {
+                self.mode = match mode_id.to_u8() {
+                    Some(1u8) => TheaterChaseMode::Regular,
+                    Some(2u8) => TheaterChaseMode::Rainbow,
+                    _ => return Err(eyre!("Invalid chase mode: {:?}", mode_id)),
+                };
+            }
+            ("/variable/pixel_width", [
+                Float(tail_length),
+            ]) => {
+                self.tail_length = tail_length
+                    .to_usize()
+                    .ok_or_else(|| eyre!("Invalid tail_length"))?;
+            }
+            ("/variable/pixel_distance", [
+                Float(pixel_distance),
+            ]) => {
+                self.pixel_distance = pixel_distance
+                    .to_usize()
+                    .ok_or_else(|| eyre!("Invalid pixel_distance"))?;
+            }
+            _ => {
+                return Err(eyre!("Unsupported packet received. addr: {:?} args: {:?}", addr, args))
+            }
+        };
+        Ok(())
+    }
+
 }
 
 impl TheaterChase {
@@ -76,15 +97,21 @@ impl TheaterChase {
         for (led_index, led_color) in leds {
             let tail_distance = (led_index + program_index) % self.pixel_distance;
 
-            *led_color = if tail_distance == 0 {
+            *led_color = if tail_distance < self.tail_length {
+                // Set the LED hue depending on the mode and distance from the head of the tail
+                let hue = match self.mode {
+                    TheaterChaseMode::Rainbow => {
+                        if tail_distance == 0 {
+                            (led_index * 10) as f32
+                        } else {
+                            (led_index * 10 - (self.pixel_distance - tail_distance * 3 + 1)) as f32
+                        }
+                    }
+                    TheaterChaseMode::Regular => color1.hue.into(),
+                };
+
                 hsl(
-                    (led_index as f32 * 10.0) % 255.0 / 255.0,
-                    color1.saturation,
-                    color1.lightness,
-                )
-            } else if tail_distance < self.tail_length {
-                hsl(
-                    ((led_index as f32 * 10.0 - (self.pixel_distance - tail_distance * 3 + 1) as f32)) % 255.0 / 255.0,
+                    hue % 255.0 / 255.0,
                     color1.saturation,
                     color1.lightness,
                 )
@@ -94,4 +121,3 @@ impl TheaterChase {
         }
     }
 }
-

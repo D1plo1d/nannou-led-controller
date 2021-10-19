@@ -1,5 +1,9 @@
-use nannou::color::{Hsl, IntoColor};
-
+use nannou::{color::{Hsl, IntoColor}};
+use eyre::{
+    eyre,
+    // Error,
+    Result,
+};
 use crate::program::Program;
 
 #[derive(Debug)]
@@ -51,7 +55,26 @@ impl Program for Scanner {
             }
         };
         // Increment the counter
-        self.scan_index = self.scan_index.wrapping_add(1);
+        self.scan_index = if model.run_forwards {
+            self.scan_index.wrapping_add(1)
+        } else {
+            self.scan_index.wrapping_sub(1)
+        }
+    }
+
+    fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
+        use nannou_osc::Type::*;
+        match (addr, args) {
+            ("/variable/tail_length", [
+                Float(tail_length),
+            ]) => {
+                self.tail_length = *tail_length;
+            }
+            _ => {
+                return Err(eyre!("Unsupported packet received. addr: {:?} args: {:?}", addr, args))
+            }
+        };
+        Ok(())
     }
 }
 

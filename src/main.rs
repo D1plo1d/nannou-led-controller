@@ -1,4 +1,4 @@
-use nannou::prelude::*;
+use nannou::{color::Shade, prelude::*};
 use local_ip_address::local_ip;
 use nannou_osc::Packet;
 use program::Program;
@@ -20,10 +20,15 @@ pub type LedStripVec = Vec<[LedColor; 150]>;
 pub struct Model {
     pub receiver: nannou_osc::Receiver,
     pub led_strips: LedStripVec,
+    pub global_brightness_multiplier: f32,
+    pub brightness1: f32,
+    pub brightness2: f32,
     pub color: crate::LedColor,
     pub color2: crate::LedColor,
+    pub run_forwards: bool,
     pub fps: f32,
     pub fps_offset: f32,
+    pub paused: bool,
     pub program: Option<Box<dyn Program>>,
 }
 
@@ -54,10 +59,15 @@ fn model(app: &App) -> Model {
     Model {
         receiver,
         led_strips,
+        global_brightness_multiplier: 1.0,
+        brightness1: 0.5,
+        brightness2: 0.5,
         color: nannou::color::rgb(1.0, 0.0, 0.0).into(),
         color2: nannou::color::rgb(0.0, 0.0, 0.0).into(),
+        run_forwards: true,
         fps: 40.0,
         fps_offset: 0.0,
+        paused: false,
         program: None,
         // program: Some(Box::new(scanner::Scanner::default())),
     }
@@ -71,8 +81,9 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Receive any pending osc packets.
     for (packet, _) in model.receiver.try_iter() {
-        println!("Received OSC packet: {:?}", packet);
+        // println!("Received OSC packet: {:?}", packet);
         use nannou_osc::{ Type::*, Message};
+
         let empty_args = vec![];
 
         let (addr, args) = match &packet {
@@ -84,6 +95,8 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
                 continue;
             },
         };
+
+        // Update settings based on the OSC message
         match (addr, args) {
             // Hue and Saturation
             ("/variable/color1", [
@@ -92,49 +105,80 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
             ]) => {
                 model.color = hsl(hue / 255.0, saturation / 255.0, model.color.lightness);
             }
+            ("/variable/color2", [
+                Float(hue),
+                Float(saturation),
+            ]) => {
+                model.color2 = hsl(hue / 255.0, saturation / 255.0, model.color2.lightness);
+            }
             // Brightness
+            ("/variable/globalbrightness", [
+                Float(global_brightness),
+            ]) => {
+                model.global_brightness_multiplier = global_brightness / 255.0;
+                model.color.lightness = model.brightness1 * model.global_brightness_multiplier;
+                model.color2.lightness = model.brightness2 * model.global_brightness_multiplier;
+            }
             ("/variable/value1", [
                 Float(lightness),
             ]) => {
-                model.color.lightness = lightness / 255.0;
+                model.brightness1 = lightness / 255.0;
+                model.color.lightness = model.brightness1 * model.global_brightness_multiplier;
             }
+            ("/variable/value2", [
+                Float(lightness),
+            ]) => {
+                model.brightness2 = lightness / 255.0;
+                model.color2.lightness = model.brightness2 * model.global_brightness_multiplier;
+            }
+            // Direction
+            ("/variable/direction", [
+                // Input is between 0 and 255
+                Float(input),
+            ]) => {
+                model.run_forwards = input.to_u8() == Some(1u8);
+            }
+            // Speed
             ("/variable/interval", [
                 // Input is between 0 and 255
                 Float(input),
             ]) => {
                 model.fps = *input;
-                // TODO: There is an upstream issue to fix rate mode in Nannou.
-                // if model.fps != 0.0 {
-                //     app.set_loop_mode(LoopMode::rate_fps(model.fps as f64))
-                // }
             }
-            (addr, _) => {
-                if let Ok(program) = program_from_osc_addr(&addr) {
+            ("/variable/stopstart", _) => {
+                model.paused = !model.paused;
+            }
+            // Other settings
+            (addr, args) => {
+                // Program selection
+                if let Some(program) = program_from_osc_addr(&addr) {
                     model.program = Some(program);
-                } else {
-                    println!("Unsupported packet received: {:?}", packet);
+                // Program-specific settings
+                } else if let Err(err) = model.program
+                    .as_mut()
+                    .map(|program| program.receive_osc_packet(addr, args))
+                    .transpose()
+                {
+                    println!("{:?}", err);
                 }
             }
         }
-        println!("Program: {:?}", model.program);
     }
 
-    if let Some(mut program) = model.program.take() {
-        model.fps_offset += model.fps;
-        let frames = model.fps_offset as usize / 40;
-        model.fps_offset = model.fps_offset % 40.0;
+    // Run the program and update the LEDs
+    if model.fps != 0.0 && !model.paused {
+        if let Some(mut program) = model.program.take() {
+            model.fps_offset += model.fps;
+            let frames = model.fps_offset as usize / 40;
+            model.fps_offset = model.fps_offset % 40.0;
 
-        for _ in 0..frames {
-            program.update(model);
+            for _ in 0..frames {
+                program.update(model);
+            }
+
+            model.program = Some(program);
         }
-
-        model.program = Some(program);
     }
-
-    if model.fps != 0.0 {
-        std::thread::sleep(std::time::Duration::from_secs_f64(1f64 / model.fps as f64));
-    }
-    // thread::sleep(time::Duration::from_millis(100));
 }
 
 const PAGE_MARGIN: f32 = 6.0;
