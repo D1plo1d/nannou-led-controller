@@ -9,6 +9,7 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
+mod blink;
 mod pulse;
 mod program;
 mod scanner;
@@ -68,8 +69,8 @@ fn model(app: &App) -> Model {
         fps: 40.0,
         fps_offset: 0.0,
         paused: false,
-        program: None,
-        // program: Some(Box::new(scanner::Scanner::default())),
+        // program: None,
+        program: Some(Box::new(blink::Blink::default())),
     }
 }
 

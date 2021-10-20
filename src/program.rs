@@ -14,7 +14,7 @@ pub fn program_from_osc_addr(s: &str) -> Option<Box<dyn Program>> {
         // "/program/pulse" => Ok(Box::new(crate::pulse::Pulse)),
         "/program/scanner" => Some(Box::new(crate::scanner::Scanner::default())),
         // "/program/fireworks" => Some(Self::Fireworks(Fireworks)),
-        // "/program/blink" => Some(Self::Blink(Blink)),
+        "/program/blink" => Some(Box::new(crate::blink::Blink::default())),
         "/program/theaterchase" => Some(Box::new(crate::theater_chase::TheaterChase::default())),
         // "/program/vumeter" => Some(Self::VUMeter(VUMeter)),
         // "/program/preprogram" => Some(Self::PreProgram(PreProgram)),

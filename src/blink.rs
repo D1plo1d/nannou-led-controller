@@ -1,6 +1,6 @@
-use nannou::{color::{Hsl, hsl}, prelude::ToPrimitive};
+use nannou::{color::{Gradient, Hsl, IntoColor, Srgb}, rand};
 use eyre::{
-    eyre,
+    // eyre,
     // Error,
     Result,
 };
@@ -9,41 +9,43 @@ use crate::program::Program;
 #[derive(Debug)]
 pub struct Blink {
     index: usize,
-    tail_length: usize,
-    pixel_distance: usize,
-    mode: TheaterChaseMode,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum TheaterChaseMode {
-    Rainbow,
-    Regular,
+    led_gradient_index: Vec<usize>,
+    led_next_blink: Vec<usize>,
+    gradient: Gradient<Hsl>,
 }
 
 impl Default for Blink {
     fn default() -> Self {
-        Self {
-            index: Default::default(),
-            tail_length: 10,
-            pixel_distance: 25,
-            mode: TheaterChaseMode::Regular,
-        }
+        let mut blink = Self {
+            index: 0,
+            led_gradient_index: vec![0; 64*1024],
+            led_next_blink: vec![0; 64*1024],
+            gradient: Gradient::with_domain(vec![
+                (0.0, Srgb::new(0.0, 0.0, 0.0).into_hsl()),
+                (63.0, Srgb::new(239.0 / 255.0, 0.0, 122.0  / 255.0).into_hsl()),
+                (191.0, Srgb::new(252.0 / 255.0, 255.0 / 255.0, 78.0 / 255.0).into_hsl()),
+                (255.0, Srgb::new(0.0, 0.0, 0.0).into_hsl()),
+            ]),
+        };
+
+        blink.led_next_blink.fill_with(|| {
+            rand::random::<usize>() % 400
+        });
+
+        blink
     }
 }
 
 impl Program for Blink {
     fn update(&mut self, model: &mut crate::Model) {
-        for led_strip in model.led_strips.iter_mut() {
-            let strip_len = led_strip.len();
-            let leds = led_strip.iter_mut().enumerate();
-            self.update_leds(
-                model.color.clone(),
-                model.color2.clone(),
-                strip_len,
-                leds,
-            )
-        }
+        let all_leds = model.led_strips
+            .iter_mut()
+            .flat_map(|led_strip| led_strip.iter_mut())
+            .enumerate();
+
+        self.update_leds(
+            all_leds,
+        );
 
         // Increment the counter
         self.index = if model.run_forwards {
@@ -54,35 +56,12 @@ impl Program for Blink {
     }
 
     fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
-        use nannou_osc::Type::*;
-        match (addr, args) {
-            ("/variable/chase_mode", [
-                Float(mode_id),
-            ]) => {
-                self.mode = match mode_id.to_u8() {
-                    Some(1u8) => TheaterChaseMode::Regular,
-                    Some(2u8) => TheaterChaseMode::Rainbow,
-                    _ => return Err(eyre!("Invalid chase mode: {:?}", mode_id)),
-                };
-            }
-            ("/variable/pixel_width", [
-                Float(tail_length),
-            ]) => {
-                self.tail_length = tail_length
-                    .to_usize()
-                    .ok_or_else(|| eyre!("Invalid tail_length"))?;
-            }
-            ("/variable/pixel_distance", [
-                Float(pixel_distance),
-            ]) => {
-                self.pixel_distance = pixel_distance
-                    .to_usize()
-                    .ok_or_else(|| eyre!("Invalid pixel_distance"))?;
-            }
-            _ => {
-                return Err(eyre!("Unsupported packet received. addr: {:?} args: {:?}", addr, args))
-            }
-        };
+        // use nannou_osc::Type::*;
+        // match (addr, args) {
+        //     _ => {
+        //         return Err(eyre!("Unsupported packet received. addr: {:?} args: {:?}", addr, args))
+        //     }
+        // };
         Ok(())
     }
 
@@ -91,37 +70,21 @@ impl Program for Blink {
 impl Blink {
     fn update_leds<'a>(
         &'a mut self,
-        color1: Hsl<nannou::color::encoding::Srgb>,
-        color2: Hsl<nannou::color::encoding::Srgb>,
-        led_count: usize,
         leds: impl Iterator<Item = (usize, &'a mut crate::LedColor)>
     ) {
-        let program_index = self.index % (led_count * 2);
+        let gradient_size: usize = 255;
 
         for (led_index, led_color) in leds {
-            let distance_to_leading_pixel = (led_index + program_index) % self.pixel_distance;
+            if self.index >= self.led_next_blink[led_index] {
+                let led_gradient_index = &mut self.led_gradient_index[led_index];
+                *led_color = self.gradient.get(*led_gradient_index as f32);
+                *led_gradient_index += 1;
 
-            *led_color = if distance_to_leading_pixel < self.tail_length {
-                // Set the LED hue depending on the mode and distance from the head of the tail
-                let hue = match self.mode {
-                    TheaterChaseMode::Rainbow => {
-                        if distance_to_leading_pixel == 0 {
-                            (led_index * 10) as f32
-                        } else {
-                            (led_index * 10 - (self.pixel_distance - distance_to_leading_pixel * 3 + 1)) as f32
-                        }
-                    }
-                    TheaterChaseMode::Regular => color1.hue.into(),
-                };
-
-                hsl(
-                    hue % 255.0 / 255.0,
-                    color1.saturation,
-                    color1.lightness,
-                )
-            } else {
-                color2.clone()
-            };
+                if *led_gradient_index > gradient_size {
+                    *led_gradient_index = 0;
+                    self.led_next_blink[led_index] = self.index + rand::random::<usize>() % 400;
+                }
+            }
         }
     }
 }
