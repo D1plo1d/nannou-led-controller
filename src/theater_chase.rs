@@ -46,7 +46,11 @@ impl Program for TheaterChase {
         }
 
         // Increment the counter
-        self.index = self.index.wrapping_add(1);
+        self.index = if model.run_forwards {
+            self.index.wrapping_add(1)
+        } else {
+            self.index.wrapping_sub(1)
+        }
     }
 
     fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
@@ -95,16 +99,16 @@ impl TheaterChase {
         let program_index = self.index % (led_count * 2);
 
         for (led_index, led_color) in leds {
-            let tail_distance = (led_index + program_index) % self.pixel_distance;
+            let distance_to_leading_pixel = (led_index + program_index) % self.pixel_distance;
 
-            *led_color = if tail_distance < self.tail_length {
+            *led_color = if distance_to_leading_pixel < self.tail_length {
                 // Set the LED hue depending on the mode and distance from the head of the tail
                 let hue = match self.mode {
                     TheaterChaseMode::Rainbow => {
-                        if tail_distance == 0 {
+                        if distance_to_leading_pixel == 0 {
                             (led_index * 10) as f32
                         } else {
-                            (led_index * 10 - (self.pixel_distance - tail_distance * 3 + 1)) as f32
+                            (led_index * 10 - (self.pixel_distance - distance_to_leading_pixel * 3 + 1)) as f32
                         }
                     }
                     TheaterChaseMode::Regular => color1.hue.into(),
