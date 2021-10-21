@@ -34,17 +34,11 @@ impl Program for Scanner {
     fn update(&mut self, model: &mut crate::Model) {
         match self.mode {
             ScannerMode::ContinuousStrip => {
-                let total_led_count = model.led_strips
-                    .iter()
-                    .fold(0, |sum, led_strip| sum + led_strip.len());
-                // let total_led_count = 150;
-
-                let all_leds = model.led_strips
-                    .iter_mut()
-                    .flat_map(|led_strip| led_strip.iter_mut())
-                    .enumerate();
-
-                self.update_leds(model.color.clone(), total_led_count, all_leds);
+                self.update_leds(
+                    model.color.clone(),
+                    model.total_led_count(),
+                    model.all_leds_mut(),
+                );
             }
             ScannerMode::ParallelStrips => {
                 for led_strip in model.led_strips.iter_mut() {
@@ -62,10 +56,14 @@ impl Program for Scanner {
         }
     }
 
-    fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
+    fn receive_osc_packet<'a>(
+        &mut self,
+        addr:  &'a[&'a str],
+        args: &'a[nannou_osc::Type],
+    ) -> Result<()> {
         use nannou_osc::Type::*;
         match (addr, args) {
-            ("/variable/tail_length", [
+            (["variable", "tail_length"], [
                 Float(tail_length),
             ]) => {
                 self.tail_length = *tail_length;

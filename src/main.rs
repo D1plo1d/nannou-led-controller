@@ -1,4 +1,4 @@
-use nannou::{color::Shade, prelude::*};
+use nannou::prelude::*;
 use local_ip_address::local_ip;
 use nannou_osc::Packet;
 use program::Program;
@@ -9,11 +9,9 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
-mod blink;
-mod pulse;
 mod program;
-mod scanner;
-mod theater_chase;
+mod programs;
+mod svg_palette;
 
 pub type LedColor = Hsl<nannou::color::encoding::Srgb>;
 pub type LedStripVec = Vec<[LedColor; 150]>;
@@ -33,11 +31,27 @@ pub struct Model {
     pub program: Option<Box<dyn Program>>,
 }
 
+impl Model {
+    fn total_led_count(&self) -> usize {
+        self.led_strips
+            .iter()
+            .fold(0, |sum, led_strip| sum + led_strip.len())
+    }
+
+    fn all_leds_mut<'a>(&'a mut self) -> impl Iterator<Item = (usize, &'a mut crate::LedColor)> {
+        self.led_strips
+            .iter_mut()
+            .flat_map(|led_strip| led_strip.iter_mut())
+            .enumerate()
+    }
+}
+
 // Make sure this matches the `TARGET_PORT` in the `osc_sender.rs` example.
 const PORT: u16 = 8000;
 
 fn model(app: &App) -> Model {
-    let _w_id = app
+    // Configure the window
+    app
         .new_window()
         .title("OSC Receiver")
         .size(1440, 550)
@@ -48,16 +62,12 @@ fn model(app: &App) -> Model {
 
     // Bind an `osc::Receiver` to a port.
     let receiver = nannou_osc::receiver(PORT).unwrap();
-    if let Ok(ip_address) = local_ip() {
-        println!("Listening for OSC packets at {}:{}\n", ip_address, PORT);
-    } else {
-        println!("Listening for OSC packets on port {}\n", PORT);
-    }
 
+    // Build the model
     let led_strips = vec![[crate::LedColor::default(); 150]; 16];
-    // led_strips[1][5].blue = 1.0;
 
-    Model {
+    #[allow(unused_mut)]
+    let mut model = Model {
         receiver,
         led_strips,
         global_brightness_multiplier: 1.0,
@@ -70,8 +80,20 @@ fn model(app: &App) -> Model {
         fps_offset: 0.0,
         paused: false,
         // program: None,
-        program: Some(Box::new(blink::Blink::default())),
+        program: None,
+    };
+
+    // model.program = Some(Box::new(programs::Blink::new(&model).unwrap()));
+
+    // Print the local ip address
+    if let Ok(ip_address) = local_ip() {
+        println!("Listening for OSC packets at {}:{}\n", ip_address, PORT);
+    } else {
+        println!("Listening for OSC packets on port {}\n", PORT);
     }
+
+    // Return the model
+    model
 }
 
 // fn raw_window_event(app: &App, model: &mut Model, event: &ui::RawWindowEvent) {
@@ -89,7 +111,10 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
         let (addr, args) = match &packet {
             Packet::Message(Message { addr, args }) => {
-                (&addr[..], &args.as_ref().unwrap_or(&empty_args)[..])
+                (
+                    addr.trim_start_matches('/').split('/').collect::<Vec<_>>(),
+                    &args.as_ref().unwrap_or(&empty_args)[..]
+                )
             }
             _ => {
                 println!("Unsupported packet received: {:?}", packet);
@@ -98,64 +123,68 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
         };
 
         // Update settings based on the OSC message
-        match (addr, args) {
+        match (&addr[..], args) {
             // Hue and Saturation
-            ("/variable/color1", [
+            (["variable", "color1"], [
                 Float(hue),
                 Float(saturation),
             ]) => {
                 model.color = hsl(hue / 255.0, saturation / 255.0, model.color.lightness);
             }
-            ("/variable/color2", [
+            (["variable", "color2"], [
                 Float(hue),
                 Float(saturation),
             ]) => {
                 model.color2 = hsl(hue / 255.0, saturation / 255.0, model.color2.lightness);
             }
             // Brightness
-            ("/variable/globalbrightness", [
+            (["variable", "globalbrightness"], [
                 Float(global_brightness),
             ]) => {
                 model.global_brightness_multiplier = global_brightness / 255.0;
                 model.color.lightness = model.brightness1 * model.global_brightness_multiplier;
                 model.color2.lightness = model.brightness2 * model.global_brightness_multiplier;
             }
-            ("/variable/value1", [
+            (["variable", "value1"], [
                 Float(lightness),
             ]) => {
                 model.brightness1 = lightness / 255.0;
                 model.color.lightness = model.brightness1 * model.global_brightness_multiplier;
             }
-            ("/variable/value2", [
+            (["variable", "value2"], [
                 Float(lightness),
             ]) => {
                 model.brightness2 = lightness / 255.0;
                 model.color2.lightness = model.brightness2 * model.global_brightness_multiplier;
             }
             // Direction
-            ("/variable/direction", [
+            (["variable", "direction"], [
                 // Input is between 0 and 255
                 Float(input),
             ]) => {
                 model.run_forwards = input.to_u8() == Some(1u8);
             }
             // Speed
-            ("/variable/interval", [
+            (["variable", "interval"], [
                 // Input is between 0 and 255
                 Float(input),
             ]) => {
                 model.fps = *input;
             }
-            ("/variable/stopstart", _) => {
+            (["variable", "stopstart"], _) => {
                 model.paused = !model.paused;
+            }
+            // Program selection
+            (["program", program_name], _) => {
+                match program_from_osc_addr(program_name, &model) {
+                    Ok(program) => model.program = Some(program),
+                    Err(err) => println!("{:?}", err),
+                }
             }
             // Other settings
             (addr, args) => {
-                // Program selection
-                if let Some(program) = program_from_osc_addr(&addr) {
-                    model.program = Some(program);
                 // Program-specific settings
-                } else if let Err(err) = model.program
+                if let Err(err) = model.program
                     .as_mut()
                     .map(|program| program.receive_osc_packet(addr, args))
                     .transpose()

@@ -34,16 +34,12 @@ impl Default for TheaterChase {
 
 impl Program for TheaterChase {
     fn update(&mut self, model: &mut crate::Model) {
-        for led_strip in model.led_strips.iter_mut() {
-            let strip_len = led_strip.len();
-            let leds = led_strip.iter_mut().enumerate();
-            self.update_leds(
-                model.color.clone(),
-                model.color2.clone(),
-                strip_len,
-                leds,
-            )
-        }
+        self.update_leds(
+            model.color.clone(),
+            model.color2.clone(),
+            model.total_led_count(),
+            model.all_leds_mut(),
+        );
 
         // Increment the counter
         self.index = if model.run_forwards {
@@ -53,10 +49,14 @@ impl Program for TheaterChase {
         }
     }
 
-    fn receive_osc_packet<'a>(&mut self, addr: &'a str, args: &'a[nannou_osc::Type]) -> Result<()> {
+    fn receive_osc_packet<'a>(
+        &mut self,
+        addr:  &'a[&'a str],
+        args: &'a[nannou_osc::Type],
+    ) -> Result<()> {
         use nannou_osc::Type::*;
         match (addr, args) {
-            ("/variable/chase_mode", [
+            (["variable", "chase_mode"], [
                 Float(mode_id),
             ]) => {
                 self.mode = match mode_id.to_u8() {
@@ -65,14 +65,14 @@ impl Program for TheaterChase {
                     _ => return Err(eyre!("Invalid chase mode: {:?}", mode_id)),
                 };
             }
-            ("/variable/pixel_width", [
+            (["variable", "pixel_width"], [
                 Float(tail_length),
             ]) => {
                 self.tail_length = tail_length
                     .to_usize()
                     .ok_or_else(|| eyre!("Invalid tail_length"))?;
             }
-            ("/variable/pixel_distance", [
+            (["variable", "pixel_distance"], [
                 Float(pixel_distance),
             ]) => {
                 self.pixel_distance = pixel_distance
