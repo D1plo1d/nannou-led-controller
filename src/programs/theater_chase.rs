@@ -1,4 +1,4 @@
-use nannou::{color::{Hsl, hsl}, prelude::ToPrimitive};
+use nannou::{color::hsl, prelude::ToPrimitive};
 use eyre::{
     eyre,
     // Error,
@@ -34,12 +34,35 @@ impl Default for TheaterChase {
 
 impl Program for TheaterChase {
     fn update(&mut self, model: &mut crate::Model) {
-        self.update_leds(
-            model.color.clone(),
-            model.color2.clone(),
-            model.total_led_count(),
-            model.all_leds_mut(),
-        );
+        let program_index = self.index % (model.total_led_count() * 2);
+        let color1 = model.color.clone();
+        let color2 = model.color2.clone();
+
+        for (led_index, led_color) in model.all_leds_mut() {
+            let distance_to_leading_pixel = (led_index + program_index) % self.pixel_distance;
+
+            *led_color = if distance_to_leading_pixel < self.tail_length {
+                // Set the LED hue depending on the mode and distance from the head of the tail
+                let hue = match self.mode {
+                    TheaterChaseMode::Rainbow => {
+                        if distance_to_leading_pixel == 0 {
+                            (led_index * 10) as f32
+                        } else {
+                            (led_index * 10 - (self.pixel_distance - distance_to_leading_pixel * 3 + 1)) as f32
+                        }
+                    }
+                    TheaterChaseMode::Regular => color1.hue.into(),
+                };
+
+                hsl(
+                    hue % 255.0 / 255.0,
+                    color1.saturation,
+                    color1.lightness,
+                )
+            } else {
+                color2.clone()
+            };
+        }
 
         // Increment the counter
         self.index = if model.run_forwards {
@@ -86,42 +109,4 @@ impl Program for TheaterChase {
         Ok(())
     }
 
-}
-
-impl TheaterChase {
-    fn update_leds<'a>(
-        &'a mut self,
-        color1: Hsl<nannou::color::encoding::Srgb>,
-        color2: Hsl<nannou::color::encoding::Srgb>,
-        led_count: usize,
-        leds: impl Iterator<Item = (usize, &'a mut crate::LedColor)>
-    ) {
-        let program_index = self.index % (led_count * 2);
-
-        for (led_index, led_color) in leds {
-            let distance_to_leading_pixel = (led_index + program_index) % self.pixel_distance;
-
-            *led_color = if distance_to_leading_pixel < self.tail_length {
-                // Set the LED hue depending on the mode and distance from the head of the tail
-                let hue = match self.mode {
-                    TheaterChaseMode::Rainbow => {
-                        if distance_to_leading_pixel == 0 {
-                            (led_index * 10) as f32
-                        } else {
-                            (led_index * 10 - (self.pixel_distance - distance_to_leading_pixel * 3 + 1)) as f32
-                        }
-                    }
-                    TheaterChaseMode::Regular => color1.hue.into(),
-                };
-
-                hsl(
-                    hue % 255.0 / 255.0,
-                    color1.saturation,
-                    color1.lightness,
-                )
-            } else {
-                color2.clone()
-            };
-        }
-    }
 }

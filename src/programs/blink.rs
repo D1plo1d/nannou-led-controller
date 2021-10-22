@@ -35,14 +35,24 @@ impl Blink {
 
 impl Program for Blink {
     fn update(&mut self, model: &mut crate::Model) {
-        let all_leds = model.led_strips
-            .iter_mut()
-            .flat_map(|led_strip| led_strip.iter_mut())
-            .enumerate();
+        let gradient_size: usize = 255;
 
-        self.update_leds(
-            all_leds,
-        );
+        for (led_index, led_color) in model.all_leds_mut() {
+            if self.index >= self.led_next_blink[led_index] {
+                let led_gradient_index = self.index - self.led_next_blink[led_index];
+                *led_color = self.gradient.get(led_gradient_index as f32);
+
+                if led_gradient_index == gradient_size {
+                    let next_blink_offset = if self.max_ticks_until_blink == 0 {
+                        0
+                    } else {
+                        rand::random::<usize>() % self.max_ticks_until_blink
+                    };
+
+                    self.led_next_blink[led_index] = self.index + next_blink_offset;
+                }
+            }
+        }
 
         // Increment the counter
         self.index = if model.run_forwards {
@@ -75,31 +85,5 @@ impl Program for Blink {
             }
         };
         Ok(())
-    }
-}
-
-impl Blink {
-    fn update_leds<'a>(
-        &'a mut self,
-        leds: impl Iterator<Item = (usize, &'a mut crate::LedColor)>
-    ) {
-        let gradient_size: usize = 255;
-
-        for (led_index, led_color) in leds {
-            if self.index >= self.led_next_blink[led_index] {
-                let led_gradient_index = self.index - self.led_next_blink[led_index];
-                *led_color = self.gradient.get(led_gradient_index as f32);
-
-                if led_gradient_index == gradient_size {
-                    let next_blink_offset = if self.max_ticks_until_blink == 0 {
-                        0
-                    } else {
-                        rand::random::<usize>() % self.max_ticks_until_blink
-                    };
-
-                    self.led_next_blink[led_index] = self.index + next_blink_offset;
-                }
-            }
-        }
     }
 }
