@@ -1,9 +1,7 @@
 use nannou::prelude::*;
 use local_ip_address::local_ip;
 use nannou_osc::Packet;
-use program::Program;
-
-use crate::{program::program_from_osc_addr};
+use program::ProgramExecutor;
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -28,7 +26,7 @@ pub struct Model {
     pub fps: f32,
     pub fps_offset: f32,
     pub paused: bool,
-    pub program: Option<Box<dyn Program>>,
+    pub program_exec: Option<ProgramExecutor>,
 }
 
 impl Model {
@@ -80,10 +78,10 @@ fn model(app: &App) -> Model {
         fps_offset: 0.0,
         paused: false,
         // program: None,
-        program: None,
+        program_exec: None,
     };
 
-    // model.program = Some(Box::new(programs::Blink::new(&model).unwrap()));
+    model.program_exec = Some(ProgramExecutor::new(programs::Blink::new(&model).unwrap()));
 
     // Print the local ip address
     if let Ok(ip_address) = local_ip() {
@@ -101,7 +99,6 @@ fn model(app: &App) -> Model {
 // }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
-
     // Receive any pending osc packets.
     for (packet, _) in model.receiver.try_iter() {
         // println!("Received OSC packet: {:?}", packet);
@@ -176,17 +173,27 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
             }
             // Program selection
             (["program", program_name], _) => {
-                match program_from_osc_addr(program_name, &model) {
-                    Ok(program) => model.program = Some(program),
+                match ProgramExecutor::from_program_name(program_name, &model) {
+                    Ok(program) => model.program_exec = Some(program),
+                    Err(err) => println!("{:?}", err),
+                }
+            }
+            (["1", "push1"], _) => {
+                match ProgramExecutor::from_program_name("on", &model) {
+                    Ok(program) => model.program_exec = Some(program),
                     Err(err) => println!("{:?}", err),
                 }
             }
             // Other settings
             (addr, args) => {
                 // Program-specific settings
-                if let Err(err) = model.program
+                if let Err(err) = model.program_exec
                     .as_mut()
-                    .map(|program| program.receive_osc_packet(addr, args))
+                    .map(|exec| exec.program.receive_osc_packet(
+                        addr,
+                        args,
+                        exec.frame_index,
+                    ))
                     .transpose()
                 {
                     println!("{:?}", err);
@@ -197,16 +204,16 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Run the program and update the LEDs
     if model.fps != 0.0 && !model.paused {
-        if let Some(mut program) = model.program.take() {
+        if let Some(mut exec) = model.program_exec.take() {
             model.fps_offset += model.fps;
             let frames = model.fps_offset as usize / 40;
             model.fps_offset = model.fps_offset % 40.0;
 
             for _ in 0..frames {
-                program.update(model);
+                exec.update(model);
             }
 
-            model.program = Some(program);
+            model.program_exec = Some(exec);
         }
     }
 }

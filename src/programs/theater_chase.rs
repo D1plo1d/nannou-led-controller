@@ -8,7 +8,6 @@ use crate::program::Program;
 
 #[derive(Debug)]
 pub struct TheaterChase {
-    index: usize,
     tail_length: usize,
     pixel_distance: usize,
     mode: TheaterChaseMode,
@@ -24,7 +23,6 @@ pub enum TheaterChaseMode {
 impl Default for TheaterChase {
     fn default() -> Self {
         Self {
-            index: Default::default(),
             tail_length: 10,
             pixel_distance: 25,
             mode: TheaterChaseMode::Regular,
@@ -33,8 +31,8 @@ impl Default for TheaterChase {
 }
 
 impl Program for TheaterChase {
-    fn update(&mut self, model: &mut crate::Model) {
-        let program_index = self.index % (model.total_led_count() * 2);
+    fn update(&mut self, model: &mut crate::Model, frame_index: usize) {
+        let program_index = frame_index % (model.total_led_count() * 2);
         let color1 = model.color.clone();
         let color2 = model.color2.clone();
 
@@ -63,19 +61,13 @@ impl Program for TheaterChase {
                 color2.clone()
             };
         }
-
-        // Increment the counter
-        self.index = if model.run_forwards {
-            self.index.wrapping_add(1)
-        } else {
-            self.index.wrapping_sub(1)
-        }
     }
 
     fn receive_osc_packet<'a>(
         &mut self,
         addr:  &'a[&'a str],
         args: &'a[nannou_osc::Type],
+        _frame_index: usize,
     ) -> Result<()> {
         use nannou_osc::Type::*;
         match (addr, args) {

@@ -1,4 +1,4 @@
-use nannou::{color::{Hsl, IntoColor}};
+use nannou::{color::{Hsl}};
 use eyre::{
     eyre,
     // Error,
@@ -8,7 +8,6 @@ use crate::program::Program;
 
 #[derive(Debug)]
 pub struct Scanner {
-    scan_index: usize,
     tail_length: f32,
     mode: ScannerMode,
 }
@@ -23,7 +22,6 @@ pub enum ScannerMode {
 impl Default for Scanner {
     fn default() -> Self {
         Self {
-            scan_index: Default::default(),
             tail_length: 30.0,
             mode: ScannerMode::ParallelStrips,
         }
@@ -31,35 +29,36 @@ impl Default for Scanner {
 }
 
 impl Program for Scanner {
-    fn update(&mut self, model: &mut crate::Model) {
+    fn update(&mut self, model: &mut crate::Model, frame_index: usize) {
         match self.mode {
             ScannerMode::ContinuousStrip => {
                 self.update_leds(
                     model.color.clone(),
                     model.total_led_count(),
                     model.all_leds_mut(),
+                    frame_index,
                 );
             }
             ScannerMode::ParallelStrips => {
                 for led_strip in model.led_strips.iter_mut() {
                     let strip_len = led_strip.len();
                     let leds = led_strip.iter_mut().enumerate();
-                    self.update_leds(model.color.clone(), strip_len, leds);
+                    self.update_leds(
+                        model.color.clone(),
+                        strip_len,
+                        leds,
+                        frame_index,
+                    );
                 }
             }
         };
-        // Increment the counter
-        self.scan_index = if model.run_forwards {
-            self.scan_index.wrapping_add(1)
-        } else {
-            self.scan_index.wrapping_sub(1)
-        }
     }
 
     fn receive_osc_packet<'a>(
         &mut self,
         addr:  &'a[&'a str],
         args: &'a[nannou_osc::Type],
+        _frame_index: usize,
     ) -> Result<()> {
         use nannou_osc::Type::*;
         match (addr, args) {
@@ -81,19 +80,19 @@ impl Scanner {
         &'a mut self,
         color: Hsl<nannou::color::encoding::Srgb>,
         led_count: usize,
-        leds: impl Iterator<Item = (usize, &'a mut crate::LedColor)>
+        leds: impl Iterator<Item = (usize, &'a mut crate::LedColor)>,
+        frame_index: usize,
     ) {
-        let scan_index = self.scan_index % (led_count * 2);
+        let frame_index = frame_index % (led_count * 2);
 
         for (led_index, led_color) in leds {
-            *led_color = if led_index == scan_index {
+            *led_color = if led_index == frame_index {
                 color.clone()
-            } else if led_index == led_count * 2 - scan_index {
+            } else if led_index == led_count * 2 - frame_index {
                 color.clone()
             } else {
-                let mut hsl = led_color.into_hsl::<nannou::color::encoding::Srgb>();
-                hsl.lightness = (hsl.lightness - 1.0 / self.tail_length).max(0.0);
-                hsl.into()
+                led_color.lightness = (led_color.lightness - 1.0 / self.tail_length).max(0.0);
+                *led_color
             };
         }
     }
