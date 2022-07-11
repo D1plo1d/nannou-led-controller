@@ -264,10 +264,11 @@ fn update(_app: &App, model: &mut Model, update: Update) {
                 warn!("Failed to send UDP packet to LED controller");
                 trace!("UDP Error: {:?}", err);
             } else {
+                let since_last = update.since_last.as_millis();
                 trace!(
                     "UDP packet sent! ({} bytes, {:?} fps)",
                     packet_buf.len(),
-                    1000 / update.since_last.as_millis(),
+                    if since_last > 0 { 1000 / since_last } else { 0 },
                 );
             }
 
