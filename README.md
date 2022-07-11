@@ -6,4 +6,4 @@
 
 ## Useage
 
-`cargo run --release`
+`LED_CONTROLLER=$PI_IP_AND_PORT RUST_LOG="nannou_led_controller=trace" cargo run --release`

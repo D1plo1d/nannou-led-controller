@@ -1,5 +1,10 @@
-use nannou::prelude::*;
+#[macro_use]
+extern crate log;
+
+use std::net::UdpSocket;
+
 use local_ip_address::local_ip;
+use nannou::prelude::*;
 use nannou_osc::Packet;
 use program::ProgramExecutor;
 
@@ -12,7 +17,15 @@ mod programs;
 mod svg_palette;
 
 pub type LedColor = Hsl<nannou::color::encoding::Srgb>;
-pub type LedStripVec = Vec<[LedColor; 150]>;
+
+const NUMBER_OF_LED_STRIPS: usize = 1;
+const LED_STRIP_LEN: usize = 150;
+// const LED_STRIP_LEN: usize = 4;
+
+pub type LedStripVec = Vec<[LedColor; LED_STRIP_LEN]>;
+
+// Make sure this matches the `TARGET_PORT` in the `osc_sender.rs` example.
+const PORT: u16 = 8000;
 
 pub struct Model {
     pub receiver: nannou_osc::Receiver,
@@ -27,6 +40,7 @@ pub struct Model {
     pub fps_offset: f32,
     pub paused: bool,
     pub program_exec: Option<ProgramExecutor>,
+    pub led_controller_socket: UdpSocket,
 }
 
 impl Model {
@@ -44,13 +58,11 @@ impl Model {
     }
 }
 
-// Make sure this matches the `TARGET_PORT` in the `osc_sender.rs` example.
-const PORT: u16 = 8000;
-
 fn model(app: &App) -> Model {
+    pretty_env_logger::init();
+
     // Configure the window
-    app
-        .new_window()
+    app.new_window()
         .title("OSC Receiver")
         .size(1440, 550)
         // .raw_event(raw_window_event)
@@ -61,8 +73,24 @@ fn model(app: &App) -> Model {
     // Bind an `osc::Receiver` to a port.
     let receiver = nannou_osc::receiver(PORT).unwrap();
 
+    // This port number is arbitrary
+    let led_controller_socket = UdpSocket::bind("0.0.0.0:49781")
+        .expect("couldn't create open port 49783 for LED controller connection");
+
+    let led_controller_addr =
+        std::env::var("LED_CONTROLLER").expect("LED_CONTROLLER should be a valid host and port");
+
+    led_controller_socket
+        .connect(&led_controller_addr)
+        .expect(&format!(
+            "Connecting to LED Controller at: {:?}",
+            &led_controller_addr
+        ));
+
+    println!("Connected to LED Controller at: {:?}", &led_controller_addr);
+
     // Build the model
-    let led_strips = vec![[crate::LedColor::default(); 150]; 16];
+    let led_strips = vec![[crate::LedColor::default(); LED_STRIP_LEN]; NUMBER_OF_LED_STRIPS];
 
     #[allow(unused_mut)]
     let mut model = Model {
@@ -79,6 +107,7 @@ fn model(app: &App) -> Model {
         paused: false,
         // program: None,
         program_exec: None,
+        led_controller_socket,
     };
 
     model.program_exec = Some(ProgramExecutor::new(programs::Blink::new(&model).unwrap()));
@@ -98,25 +127,23 @@ fn model(app: &App) -> Model {
 //     model.ui.handle_raw_event(app, event);
 // }
 
-fn update(_app: &App, model: &mut Model, _update: Update) {
+fn update(_app: &App, model: &mut Model, update: Update) {
     // Receive any pending osc packets.
     for (packet, _) in model.receiver.try_iter() {
         // println!("Received OSC packet: {:?}", packet);
-        use nannou_osc::{ Type::*, Message};
+        use nannou_osc::{Message, Type::*};
 
         let empty_args = vec![];
 
         let (addr, args) = match &packet {
-            Packet::Message(Message { addr, args }) => {
-                (
-                    addr.trim_start_matches('/').split('/').collect::<Vec<_>>(),
-                    &args.as_ref().unwrap_or(&empty_args)[..]
-                )
-            }
+            Packet::Message(Message { addr, args }) => (
+                addr.trim_start_matches('/').split('/').collect::<Vec<_>>(),
+                &args.as_ref().unwrap_or(&empty_args)[..],
+            ),
             _ => {
                 println!("Unsupported packet received: {:?}", packet);
                 continue;
-            },
+            }
         };
 
         // Update settings based on the OSC message
@@ -213,6 +240,37 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
                 exec.update(model);
             }
 
+            use rosc::{OscColor, OscMessage, OscPacket, OscType};
+
+            let led_control_packet = OscPacket::Message(OscMessage {
+                addr: "/led_strips/0".to_string(),
+                args: model
+                    .all_leds_mut()
+                    .map(|(_, led)| {
+                        let rgba = Into::<Rgba>::into(*led);
+                        OscType::Color(OscColor {
+                            red: (rgba.red * 255.0) as u8,
+                            blue: (rgba.blue * 255.0) as u8,
+                            green: (rgba.green * 255.0) as u8,
+                            alpha: 1.0 as u8,
+                        })
+                    })
+                    .collect(),
+            });
+
+            let packet_buf = rosc::encoder::encode(&led_control_packet).unwrap();
+
+            if let Err(err) = model.led_controller_socket.send(&packet_buf) {
+                warn!("Failed to send UDP packet to LED controller");
+                trace!("UDP Error: {:?}", err);
+            } else {
+                trace!(
+                    "UDP packet sent! ({} bytes, {:?} fps)",
+                    packet_buf.len(),
+                    1000 / update.since_last.as_millis(),
+                );
+            }
+
             model.program_exec = Some(exec);
         }
     }
@@ -247,28 +305,30 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .wh(win_rec.wh());
 
         for (led_index, led_color) in led_strip.iter().enumerate() {
-            let x =
-                origin_x
-                + (LED_BOX_SIZE + LED_BORDER_SIZE * 2.0) * (led_index as f32 + 0.5);
-            let y =
-                offset_y - (TEXT_HEIGHT as f32) - PAGE_MARGIN
+            let x = origin_x + (LED_BOX_SIZE + LED_BORDER_SIZE * 2.0) * (led_index as f32 + 0.5);
+            let y = offset_y
+                - (TEXT_HEIGHT as f32)
+                - PAGE_MARGIN
                 - (LED_BOX_SIZE + LED_BORDER_SIZE * 2.0) * 0.5;
 
             draw.rect()
                 .x(x)
                 .y(y)
-                .w_h(LED_BOX_SIZE + LED_BORDER_SIZE * 2.0, LED_BOX_SIZE + LED_BORDER_SIZE * 2.0)
+                .w_h(
+                    LED_BOX_SIZE + LED_BORDER_SIZE * 2.0,
+                    LED_BOX_SIZE + LED_BORDER_SIZE * 2.0,
+                )
                 .stroke(gray(0.7))
                 .stroke_weight(STROKE_WEIGHT)
                 .color(BLACK);
-                // .hsv(1.0, 1.0, 1.0);
+            // .hsv(1.0, 1.0, 1.0);
 
             draw.rect()
                 .x(x - STROKE_WEIGHT / 2.0)
                 .y(y)
                 .w_h(LED_BOX_SIZE, LED_BOX_SIZE)
                 .color(*led_color);
-                // .hsv(1.0, 1.0, 1.0);
+            // .hsv(1.0, 1.0, 1.0);
         }
     }
 
